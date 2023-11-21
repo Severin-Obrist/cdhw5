@@ -67,7 +67,13 @@ and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
   end
 
 and subtype_struct c id1 id2 =
-  let fls1 = lookup_struct_option id1 c and fls2  = lookup_struct_option id2 c in
+  let flsopt1 = lookup_struct_option id1 c and flsopt2  = lookup_struct_option id2 c in
+  let fls1, fls2 =  begin match flsopt1, flsopt2 with
+                    | Some ls1, Some ls2  -> ls1, ls2
+                    | Some ls1, None      -> ls1, []
+                    | None, Some ls2      -> [], ls2
+                    | None, None          -> [], []
+                    end in
   List.fold_left (fun b x -> b && (List.mem x fls1)) true fls2
   
 
