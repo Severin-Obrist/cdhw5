@@ -48,22 +48,22 @@ let typ_of_unop : Ast.unop -> Ast.ty * Ast.ty = function
 *)
 let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
   begin match t1, t2 with
-  | TInt, TInt -> true
-  | TBool, TBool -> true
-  | TRef rty1, TRef rty2 -> subtype_ref c rty1 rty2
-  | TRef rty1, TNullRef rty2 -> subtype_ref c rty1 rty2
-  | TNullRef rty1, TNullRef rty2 -> subtype_ref c rty1 rty2
-  | _ -> false
+  | TInt, TInt                    -> true
+  | TBool, TBool                  -> true
+  | TRef rty1, TRef rty2          -> subtype_ref c rty1 rty2
+  | TRef rty1, TNullRef rty2      -> subtype_ref c rty1 rty2
+  | TNullRef rty1, TNullRef rty2  -> subtype_ref c rty1 rty2
+  | _                             -> false
   end
 
 
 (* Decides whether H |-r ref1 <: ref2 *)
 and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
   begin match t1, t2 with
-  | RString, RString -> true
-  | RArray a1, RArray a2 -> (a1 == a2)
-  | RStruct id1, RStruct id2 -> subtype_struct c id1 id2
-  | _ -> false
+  | RString, RString          -> true
+  | RArray a1, RArray a2      -> (a1 == a2)
+  | RStruct id1, RStruct id2  -> subtype_struct c id1 id2
+  | _                         -> false
   end
 
 and subtype_struct c id1 id2 =
@@ -93,7 +93,29 @@ and subtype_struct c id1 id2 =
     - tc contains the structure definition context
  *)
 let rec typecheck_ty (l : 'a Ast.node) (tc : Tctxt.t) (t : Ast.ty) : unit =
-  failwith "todo: implement typecheck_ty"
+  begin match t with
+  | TInt          -> ()
+  | TBool         -> ()
+  | TRef rty      -> typecheck_ref l tc rty
+  | TNullRef rty  -> typecheck_ref l tc rty
+  | _             -> type_error l "Bad type"
+  end
+
+and typecheck_ref l tc rty =
+  begin match rty with
+  | RString               -> ()
+  | RArray a1             -> typecheck_ty l tc a1
+  | RStruct id1           -> if lookup_struct_option id1 tc == None then type_error l "None Struct" else ()
+  | RFun (tyls1, retty1)  -> if (List.fold_left (fun b x -> b &&  ((typecheck_ty l tc x) == ())) ((typecheck_retty l tc retty1) == ()) tyls1) then () else type_error l "Bad Function"
+  | _                     -> type_error l "Bad reference type"
+  end
+
+and typecheck_retty l tc retty = 
+  begin match retty with
+  | RetVoid   -> ()
+  | RetVal ty -> typecheck_ty l tc ty
+  | _         -> type_error l "Bad return type"
+  end
 
 (* typechecking expressions ------------------------------------------------- *)
 (* Typechecks an expression in the typing context c, returns the type of the
