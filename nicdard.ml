@@ -1,6 +1,6 @@
 open Assert
 
-let global_prefix = Test_config.global_prefix ^ "./compiler-design-eth-tests/05/nicdard/"
+let global_prefix = Test_config.global_prefix ^ "./nicdard/"
 
 let subtype_unit_tests =
   let failtest (c : bool) = (fun () -> if c then failwith "should not succeed" else ()) in
