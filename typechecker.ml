@@ -143,7 +143,26 @@ and typecheck_retty l tc retty =
 
 *)
 let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
-  failwith "todo: implement typecheck_exp"
+  begin match e.elt with
+  | CNull rty -> typecheck_ref e c (rty); TNullRef rty
+  | CBool _ -> TBool
+  | CInt _ -> TInt
+  | CStr _ -> TRef RString
+  | Id id ->  let id_ty = lookup_local_option id c in 
+              begin match id_ty with
+              | Some ty   -> ty
+              | None      ->  let gid_ty = lookup_global_option id c in
+                              begin match gid_ty with
+                              | Some gy -> gy
+                              | None -> type_error e "Bad ID"
+                              end
+              end
+  | CArr (ty, exp_ls) ->  (typecheck_ty e c ty);
+                          let ty_ls = List.fold_left (fun ls x -> ls@[typecheck_exp c x]) [] exp_ls in
+                          let is_subtype = List.fold_left (fun b x -> b && subtype c x ty) true ty_ls in 
+                          if is_subtype then TRef RArray ty else type_error e "Bad CArr"
+  | _  -> type_error e "Bad Exp"
+  end
 
 (* statements --------------------------------------------------------------- *)
 
