@@ -51,14 +51,25 @@ let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
   | TInt, TInt -> true
   | TBool, TBool -> true
   | TRef rty1, TRef rty2 -> subtype_ref c rty1 rty2
+  | TRef rty1, TNullRef rty2 -> subtype_ref c rty1 rty2
+  | TNullRef rty1, TNullRef rty2 -> subtype_ref c rty1 rty2
   | _ -> false
   end
 
 
 (* Decides whether H |-r ref1 <: ref2 *)
 and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
-  
+  begin match t1, t2 with
+  | RString, RString -> true
+  | RArray a1, RArray a2 -> (a1 == a2)
+  | RStruct id1, RStruct id2 -> subtype_struct c id1 id2
+  | _ -> false
+  end
 
+and subtype_struct c id1 id2 =
+  let fls1 = lookup_struct_option id1 c and fls2  = lookup_struct_option id2 c in
+  List.fold_left (fun b x -> b && (List.mem x fls1)) true fls2
+  
 
 (* well-formed types -------------------------------------------------------- *)
 (* Implement a (set of) functions that check that types are well formed according
