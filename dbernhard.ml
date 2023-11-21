@@ -1,7 +1,7 @@
 open Assert
 
-let hw4_prefix = Test_config.global_prefix ^ "./compiler-design-eth-tests/04/dbernhard/"
-let hw5_prefix = Test_config.global_prefix ^ "./compiler-design-eth-tests/05/dbernhard/"
+let hw4_prefix = Test_config.global_prefix ^ "./dbernhard/"
+let hw5_prefix = Test_config.global_prefix ^ "./dbernhard/"
 
 let incorrect_types = [
     hw5_prefix ^ "err_subtype.oat"

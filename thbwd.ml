@@ -1,7 +1,7 @@
 open Assert
 open Gradedtests
 
-let prefix = Test_config.global_prefix ^ "./compiler-design-eth-tests/05/thbwd/"
+let prefix = Test_config.global_prefix ^ "./thbwd/"
 
 let tests = (
   executed_oat_file [
