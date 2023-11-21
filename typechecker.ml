@@ -106,7 +106,7 @@ and typecheck_ref l tc rty =
   | RString               -> ()
   | RArray a1             -> typecheck_ty l tc a1
   | RStruct id1           -> if lookup_struct_option id1 tc == None then type_error l "None Struct" else ()
-  | RFun (tyls1, retty1)  -> if (List.fold_left (fun b x -> b &&  ((typecheck_ty l tc x) == ())) ((typecheck_retty l tc retty1) == ()) tyls1) then () else type_error l "Bad Function"
+  | RFun (tyls1, retty1)  -> if (List.fold_left (fun b x -> b &&  (Unit.equal (typecheck_ty l tc x) ())) (Unit.equal (typecheck_retty l tc retty1) ()) tyls1) then () else type_error l "Bad Function"
   | _                     -> type_error l "Bad reference type"
   end
 
