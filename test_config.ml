@@ -1,1 +1,1 @@
-let global_prefix = "../"
+let global_prefix = ""
