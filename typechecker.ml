@@ -337,7 +337,7 @@ let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   end
 
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_function_ctxt"
+  failwith "todo: create_global_ctxt"
 
 
 (* This function implements the |- prog and the H ; G |- prog 
