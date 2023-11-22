@@ -168,6 +168,35 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
                                                     | None -> typecheck_exp (add_local c id TInt) exp2_n
                                                     end in 
                                           if subtype c t' ty then TRef (RArray ty) else type_error e "Bad NewArr";
+    | Index (exp1_n, exp2_n) -> begin match exp1_n.elt with
+                                | CArr (ty, exp_ls) -> if (typecheck_exp c exp2_n) == TInt then ty else type_error e "Bad Index";
+                                | _ -> type_error e "Bad Index"
+                                end
+    | Length exp1_n ->  begin match exp1_n.elt with
+                        | CArr (ty, exp_ls) -> TInt;
+                        | _ -> type_error e "Bad Length"
+                        end
+    | CStruct (id, ls) -> type_error e "Implement CStruct typecheck"
+    | Call (exp1_n, exp_ls) ->  begin match typecheck_exp c exp1_n with
+                                | TRef (RFun (tyls1, retty1)) ->  let ty_ls = List.fold_left (fun ls x -> ls@[typecheck_exp c x]) [] exp_ls in
+                                                                  let is_subtype = List.fold_left (fun b (x,y) -> b && subtype c x y ) true (List.combine ty_ls tyls1) in
+                                                                  if is_subtype then begin match retty1 with
+                                                                                      | RetVoid   -> TInt (*definitly wrong and TODO*)
+                                                                                      | RetVal ty -> ty
+                                                                                      | _         -> type_error e "Bad return type in Call typecheck"
+                                                                                      end
+                                                                                    else type_error e "Bad Call"
+                                | _ -> type_error e "Bad Call"
+                                end
+    | Bop (Eq, exp1_n, exp2_n)    ->  let t1' = typecheck_exp c exp1_n and t2' = typecheck_exp c exp2_n in
+                                      if(subtype c t1' t2') && (subtype c t2' t1') then TBool else  type_error e "Bad Eq Bop"
+    | Bop (Neq, exp1_n, exp2_n)   ->  let t1' = typecheck_exp c exp1_n and t2' = typecheck_exp c exp2_n in
+                                      if(subtype c t1' t2') && (subtype c t2' t1') then TBool else  type_error e "Bad Neq Bop"
+    | Bop (bop, exp1_n, exp2_n) -> let t1, t2, retty = typ_of_binop bop in
+                                   if (typecheck_exp c exp1_n == t1) && (typecheck_exp c exp2_n == t2) then retty else type_error e "Bad Bop"
+    | Uop (uop, exp1_n) ->  let t1, retty = typ_of_unop uop in
+                            if (typecheck_exp c exp1_n == t1) then retty else type_error e "Bad Uop"
+                                
     | _  -> type_error e "Bad Exp"
   end
 
