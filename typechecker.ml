@@ -176,7 +176,18 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
                         | CArr (ty, exp_ls) -> TInt;
                         | _ -> type_error e "Bad Length"
                         end
-    | CStruct (id, ls) -> type_error e "Implement CStruct typecheck"
+    | CStruct (id, exp_ls) -> let sorted_fields_ls =  begin match lookup_struct_option id c with
+                                        | Some s -> List.sort (fun field1 field2 -> if field1.fieldName == field2.fieldName then 0 else if field1.fieldName < field2.fieldName then -1 else 1) s
+                                        | None -> type_error e "Struct not in context (typecheck exp)"
+                                        end in
+                          let idty_ls = List.fold_left (fun ls (id,x) -> ls@[(id,typecheck_exp c x)]) [] exp_ls in
+                          let sorted_idty_ls = List.sort (fun (a,b) (c,d) -> if a == c then 0 else if a < c then -1 else 1) idty_ls in
+                          if (List.fold_left (fun bol ((a,b), field) -> bol && subtype c b field.ftyp) true (List.combine sorted_idty_ls sorted_fields_ls)) then TRef (RStruct id) else type_error e "Bad Struct"
+    | Proj (expn_1, fid) -> let exp1_ty = typecheck_exp c expn_1 in 
+                            begin match exp1_ty with
+                            | TRef (RStruct id) -> lookup_field id fid c
+                            | _ -> type_error e "Bad Struct (Field)"
+                            end
     | Call (exp1_n, exp_ls) ->  begin match typecheck_exp c exp1_n with
                                 | TRef (RFun (tyls1, retty1)) ->  let ty_ls = List.fold_left (fun ls x -> ls@[typecheck_exp c x]) [] exp_ls in
                                                                   let is_subtype = List.fold_left (fun b (x,y) -> b && subtype c x y ) true (List.combine ty_ls tyls1) in
