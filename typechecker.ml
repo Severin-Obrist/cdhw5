@@ -161,6 +161,13 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
                             let ty_ls = List.fold_left (fun ls x -> ls@[typecheck_exp c x]) [] exp_ls in
                             let is_subtype = List.fold_left (fun b x -> b && subtype c x ty) true ty_ls in 
                             if is_subtype then (TRef (RArray ty)) else type_error e "Bad CArr"
+    | NewArr (ty, exp1_n, id, exp2_n) ->  (typecheck_ty e c ty);
+                                          if (typecheck_exp c exp1_n) == TInt then () else type_error e "Bad NewArr";
+                                          let t' =  begin match lookup_local_option id c with
+                                                    | Some _ -> type_error e "Bad NewArr"
+                                                    | None -> typecheck_exp (add_local c id TInt) exp2_n
+                                                    end in 
+                                          if subtype c t' ty then TRef (RArray ty) else type_error e "Bad NewArr";
     | _  -> type_error e "Bad Exp"
   end
 
