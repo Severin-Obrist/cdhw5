@@ -302,10 +302,39 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
    constants, but can't mention other global values *)
 
 let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_struct_ctxt"
+  begin match p with
+  | [] -> Tctxt.empty
+  | d_ls -> {locals=[]; globals=[]; structs=(List.fold_left (fun ls x -> begin match x with
+                                        | Gvdecl gd -> ls
+                                        | Gfdecl fd -> ls
+                                        | Gtdecl td ->  begin match lookup_struct_option (fst td.elt) {locals=[]; globals=[]; structs=ls} with
+                                                        | Some _  -> type_error td "struct already in context"
+                                                        | None    -> (td.elt)::ls
+                                                        end
+                                        | _         -> failwith "not a decl (create_struct_ctxt)"
+                                        end
+                            ) [] d_ls)}
+  | _ -> failwith "Not a program"
+  end
 
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_function_ctxt"
+  begin match p with
+  | [] -> tc
+  | d_ls -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
+                                        | Gvdecl gd -> ls
+                                        | Gfdecl fd ->  let retty = fd.elt.frtyp in
+                                                        let fid = fd.elt.fname in
+                                                        let (ty_ls, _) = List.split fd.elt.args in
+                                                        begin match lookup_global_option fid {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} with
+                                                        | Some _  -> type_error fd "function already in context"
+                                                        | None    -> (fid, TRef(RFun (ty_ls, retty)))::ls
+                                                        end
+                                        | Gtdecl td -> ls
+                                        | _         -> failwith "not a decl (create_struct_ctxt)"
+                                        end
+                            ) [] d_ls);structs=tc.structs}
+  | _ -> failwith "Not a program"
+  end
 
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   failwith "todo: create_function_ctxt"
