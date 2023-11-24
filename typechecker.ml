@@ -337,12 +337,30 @@ let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   | _ -> failwith "Not a program"
   end
 
+(* helper function to check wether gexp conains any globals*)
+let rec contains_globals funct_c glob_c gexp =
+  begin match gexp with
+  | CNull _ | CInt _ | CBool _ | CStr _ -> false
+  | CArr (_, exp_ls) | Call (_, exp_ls) -> List.fold_left (fun b exp -> b || contains_globals funct_c glob_c exp.elt) false exp_ls
+  | NewArr (_, exp1_n, _, exp2_n) | Index (exp1_n, exp2_n) | Bop (_, exp1_n, exp2_n) -> (contains_globals funct_c glob_c exp1_n.elt) || (contains_globals funct_c glob_c exp2_n.elt)
+  | Length exp_n | Uop (_, exp_n) | Proj (exp_n, _) -> contains_globals funct_c glob_c exp_n.elt
+  | CStruct (_, id_exp_ls) -> List.fold_left (fun b (_, exp) -> b || contains_globals funct_c glob_c exp.elt) false id_exp_ls
+  | Id i -> begin match lookup_global_option i funct_c with
+            | Some _ -> false
+            | None -> begin match lookup_global_option i glob_c with
+                      | Some _ -> true
+                      | None -> false
+                      end
+            end
+  end
+
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   begin match p with
   | [] -> tc
   | d_ls -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
                                         | Gvdecl gd ->  let gid = gd.elt.name in
-                                                        let exp_ty = typecheck_exp {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} gd.elt.init in (* TODO safe noch falsch!*)
+                                                        if contains_globals tc {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} gd.elt.init.elt then type_error gd "globals clash" else 
+                                                        let exp_ty = typecheck_exp {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} gd.elt.init in
                                                         begin match lookup_global_option gid {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} with
                                                         | Some _  -> type_error gd "global already in context"
                                                         | None    -> (gid, exp_ty)::ls
