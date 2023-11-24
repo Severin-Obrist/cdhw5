@@ -245,7 +245,35 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
      block typecheck rules.
 *)
 let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
-  failwith "todo: implement typecheck_stmt"
+  match s.elt with
+  | Assn (exp1_n, exp2_n)                     ->  let lhs_id = begin match exp1_n.elt with
+                                                               | Id i -> i
+                                                               | _ -> type_error exp1_n "LHS has no ID"
+                                                               end in
+                                                  begin match lookup_option lhs_id tc with
+                                                  | Some ty -> begin match ty with
+                                                               | TRef(RFun _) -> type_error exp1_n "LHS cant be funct. pointer"
+                                                               | _ -> ()
+                                                               end
+                                                  | None   ->  ()
+                                                  end;
+                                                  let lhs_t = typecheck_exp tc exp1_n and rhs_t = typecheck_exp tc exp2_n in
+                                                  if subtype tc rhs_t lhs_t then (tc, false) else type_error exp1_n "LHS not supertype of RHS"
+  | Decl (vd_id, vd_exp_n)                    -> let exp_ty = typecheck_exp tc vd_exp_n in
+                                                  (add_local tc vd_id exp_ty, false)
+  | Ret exp_n_o                               -> (tc, false); failwith "todo: implement typecheck_stmt"
+  | SCall (exp_n, exp_ls)                     -> let exp_ty_ls = begin match typecheck_exp tc exp_n with
+                                                 | TRef (RFun(a, RetVoid)) -> a
+                                                 | _ -> type_error exp1_n "expression not void"
+                                                 end in 
+                                                 (*if (List.fold_left (fun b x -> b &&  (Unit.equal (typecheck_ty l tc x) ())) (Unit.equal (typecheck_retty l tc retty1) ()) tyls1) then () else type_error l "Bad Function"*)
+
+
+  | If (exp_n, stm1_ls, stm2_ls)              -> (tc, false); failwith "todo: implement typecheck_stmt"
+  | Cast (retty, id, exp_n, stm1_ls, stm2_ls) -> (tc, false); failwith "todo: implement typecheck_stmt"
+  | For (vd_ls, exp_n_o, stm_n_o, stm_ls)     -> (tc, false); failwith "todo: implement typecheck_stmt"
+  | While (exp_n, stm_ls)                     -> (tc, false); failwith "todo: implement typecheck_stmt"
+  | _                                         -> failwith "not a valid statement"
 
 
 (* struct type declarations ------------------------------------------------- *)
@@ -256,8 +284,8 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
 (* Helper function to look for duplicate field names *)
 let rec check_dups fs =
   match fs with
-  | [] -> false
-  | h :: t -> (List.exists (fun x -> x.fieldName = h.fieldName) t) || check_dups t
+  | []      -> false
+  | h :: t  -> (List.exists (fun x -> x.fieldName = h.fieldName) t) || check_dups t
 
 let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
   if check_dups fs
@@ -272,7 +300,10 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
     - checks that the function actually returns
 *)
 let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
-  failwith "todo: typecheck_fdecl"
+  let rev_args = List.fold_left (fun ls (a,b) -> (b,a)::ls) [] f.args in
+  let tc = {locals=rev_args@tc.locals; globals=tc.globals; structs=tc.structs} in
+  ();failwith "penis"
+  
 
 (* creating the typchecking context ----------------------------------------- *)
 
@@ -303,8 +334,8 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
 
 let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
   begin match p with
-  | [] -> Tctxt.empty
-  | d_ls -> {locals=[]; globals=[]; structs=(List.fold_left (fun ls x -> begin match x with
+  | []    -> Tctxt.empty
+  | d_ls  -> {locals=[]; globals=[]; structs=(List.fold_left (fun ls x -> begin match x with
                                         | Gvdecl gd -> ls
                                         | Gfdecl fd -> ls
                                         | Gtdecl td ->  begin match lookup_struct_option (fst td.elt) {locals=[]; globals=[]; structs=ls} with
@@ -314,14 +345,14 @@ let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
                                         | _         -> failwith "not a decl (create_struct_ctxt)"
                                         end
                             ) [] d_ls)}
-  | _ -> failwith "Not a program"
+  | _     -> failwith "Not a program"
   end
 
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   let tc = List.fold_left (fun c (id, (arg, ret)) -> Tctxt.add_global c id (TRef(RFun(arg,ret)))) tc builtins in
   begin match p with
-  | [] -> tc
-  | d_ls -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
+  | []    -> tc
+  | d_ls  -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
                                         | Gvdecl gd -> ls
                                         | Gfdecl fd ->  let retty = fd.elt.frtyp in
                                                         let fid = fd.elt.fname in
@@ -334,7 +365,7 @@ let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
                                         | _         -> failwith "not a decl (create_struct_ctxt)"
                                         end
                             ) [] d_ls);structs=tc.structs}
-  | _ -> failwith "Not a program"
+  | _   -> failwith "Not a program"
   end
 
 (* helper function to check wether gexp conains any globals*)
@@ -356,8 +387,8 @@ let rec contains_globals funct_c glob_c gexp =
 
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   begin match p with
-  | [] -> tc
-  | d_ls -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
+  | []    -> tc
+  | d_ls  -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
                                         | Gvdecl gd ->  let gid = gd.elt.name in
                                                         if contains_globals tc {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} gd.elt.init.elt then type_error gd "globals clash" else 
                                                         let exp_ty = typecheck_exp {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} gd.elt.init in
@@ -370,7 +401,7 @@ let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
                                         | _         -> failwith "not a decl (create_struct_ctxt)"
                                         end
                             ) [] d_ls);structs=tc.structs}
-  | _ -> failwith "Not a program"
+  | _   -> failwith "Not a program"
   end
 
 
