@@ -337,7 +337,22 @@ let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   end
 
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  failwith "todo: create_global_ctxt"
+  begin match p with
+  | [] -> tc
+  | d_ls -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
+                                        | Gvdecl gd ->  let gid = gd.elt.name in
+                                                        let exp_ty = typecheck_exp {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} gd.elt.init in (* TODO safe noch falsch!*)
+                                                        begin match lookup_global_option gid {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} with
+                                                        | Some _  -> type_error gd "global already in context"
+                                                        | None    -> (gid, exp_ty)::ls
+                                                        end
+                                        | Gfdecl fd -> ls
+                                        | Gtdecl td -> ls
+                                        | _         -> failwith "not a decl (create_struct_ctxt)"
+                                        end
+                            ) [] d_ls);structs=tc.structs}
+  | _ -> failwith "Not a program"
+  end
 
 
 (* This function implements the |- prog and the H ; G |- prog 
