@@ -318,6 +318,7 @@ let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
   end
 
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
+  let tc = List.fold_left (fun c (id, (arg, ret)) -> Tctxt.add_global c id (TRef(RFun(arg,ret)))) tc builtins in
   begin match p with
   | [] -> tc
   | d_ls -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
