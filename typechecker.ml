@@ -263,7 +263,15 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
                                                   if subtype tc rhs_t lhs_t then (tc, false) else type_error exp1_n "LHS not supertype of RHS"
   | Decl (vd_id, vd_exp_n)                    ->  let exp_ty = typecheck_exp tc vd_exp_n in
                                                   (add_local tc vd_id exp_ty, false)
-  | Ret exp_n_o                               ->  (tc, false); failwith "todo: implement typecheck_stmt"
+  | Ret (Some exp_n)                          ->  let t' = typecheck_exp tc exp_n in
+                                                  begin match to_ret with
+                                                  | RetVoid   -> type_error exp_n "expected void return but got something else"
+                                                  | RetVal t  -> if subtype tc t' t then (tc, true) else type_error exp_n "return type is not subtype of expected return type"
+                                                  end
+  | Ret None                                  ->  begin match to_ret with
+                                                  | RetVoid   -> (tc, true)
+                                                  | RetVal t  -> type_error s "expect non void return but got void"
+                                                  end
   | SCall (exp_n, exp_ls)                     ->  let super_ty_ls = begin match typecheck_exp tc exp_n with
                                                   | TRef (RFun(a, RetVoid)) -> a
                                                   | _ -> type_error exp_n "expression not void"
@@ -275,7 +283,7 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
                                                   if is_all_subtype then (tc, false) else type_error exp_n "Params have wrong type"
   | If (exp_n, stm1_ls, stm2_ls)              ->  let guard_ty = typecheck_exp tc exp_n in
                                                   begin match guard_ty with
-                                                    | TBool ->  let (_, true_block_returns) = typecheck_block tc stm1_ls to_ret and (_, false_block_returns) = typecheck_block tc stm2_ls to_ret in
+                                                    | TBool         ->  let (_, true_block_returns) = typecheck_block tc stm1_ls to_ret and (_, false_block_returns) = typecheck_block tc stm2_ls to_ret in
                                                                 tc, (true_block_returns && false_block_returns)
                                                     | _     -> type_error exp_n "If - expression doesn't return a bool"
                                                   end
@@ -311,9 +319,12 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
   | _                                         -> failwith "not a valid statement"
 
   and typecheck_block (tc : Tctxt.t) (sl:Ast.stmt node list) (to_ret:ret_ty) : Tctxt.t * bool = 
-      let returns, tc', _ = List.fold_left (fun (b, c, ret) s -> 
-        let stmt_c, stmt_b = typecheck_stmt c s ret in
-        (b && stmt_b), stmt_c, ret) (true, tc, to_ret) sl in
+      let returns, tc' = List.fold_left (fun (b, c) s -> 
+        let stmt_c, stmt_b = typecheck_stmt c s to_ret in
+        begin if b then
+          type_error s "block returns before last statement"
+        else
+          (b || stmt_b), stmt_c end) (false, tc) sl in
       tc', returns
 
 
@@ -343,7 +354,8 @@ let typecheck_tdecl (tc : Tctxt.t) id fs  (l : 'a Ast.node) : unit =
 let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
   let rev_args = List.fold_left (fun ls (a,b) -> (b,a)::ls) [] f.args in
   let tc = {locals=rev_args@tc.locals; globals=tc.globals; structs=tc.structs} in
-  ();failwith "penis"
+  let _, returns = typecheck_block tc f.body f.frtyp in
+  if returns then () else type_error l "function doesnt return"
   
 
 (* creating the typchecking context ----------------------------------------- *)
