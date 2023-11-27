@@ -61,20 +61,39 @@ let rec subtype (c : Tctxt.t) (t1 : Ast.ty) (t2 : Ast.ty) : bool =
 and subtype_ref (c : Tctxt.t) (t1 : Ast.rty) (t2 : Ast.rty) : bool =
   begin match t1, t2 with
   | RString, RString          -> true
-  | RArray a1, RArray a2      -> (a1 == a2)
+  | RArray a1, RArray a2      -> (a1 = a2)
   | RStruct id1, RStruct id2  -> subtype_struct c id1 id2
+  | RFun(args1, ret1), RFun(args2, ret2) -> 
+    subtype_ret_ty c ret1 ret2 && (subtype_args c args2 args1)
   | _                         -> false
+  end
+
+and subtype_args c ls1 ls2 = 
+  begin match ls1, ls2 with
+    | a::tl, a'::tl' -> (subtype c a a') && (subtype_args c tl tl') 
+    | [],[] -> true
+    | _,_ -> false
   end
 
 and subtype_struct c id1 id2 =
   let flsopt1 = lookup_struct_option id1 c and flsopt2  = lookup_struct_option id2 c in
-  let fls1, fls2 =  begin match flsopt1, flsopt2 with
-                    | Some ls1, Some ls2  -> ls1, ls2
-                    | Some ls1, None      -> ls1, []
-                    | None, Some ls2      -> [], ls2
-                    | None, None          -> [], []
+  let is_subtype =  begin match flsopt1, flsopt2 with
+                    | Some ls1, Some ls2  -> begin match ls1, ls2 with
+                                              | _, [] -> true
+                                              | [], _ -> false
+                                              | _     -> List.fold_left (fun b x -> b && (List.mem x ls1)) true ls2
+                                             end
+                    | _, None | None, _ | None, None -> false
                     end in
-  List.fold_left (fun b x -> b && (List.mem x fls1)) true fls2
+  is_subtype
+
+and subtype_ret_ty c ret1 ret2 = 
+  begin match ret1, ret2 with
+  | RetVal t1, RetVal t2  -> subtype c t1 t2
+  | RetVoid, RetVoid      -> true
+  | _                     -> false
+  end
+
   
 
 (* well-formed types -------------------------------------------------------- *)
@@ -142,6 +161,11 @@ and typecheck_retty l tc retty =
    a=1} is well typed.  (You should sort the fields to compare them.)
 
 *)
+let rec print_ctxt c = 
+  match c with
+  | l::ls -> print_endline (fst l); print_ctxt ls
+  | [] -> ()
+
 let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
   begin match e.elt with
     | CNull rty -> typecheck_ref e c (rty); TNullRef rty
@@ -154,7 +178,7 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
                   | None      ->  let gid_ty = lookup_global_option id c in
                                   begin match gid_ty with
                                     | Some gy -> gy
-                                    | None -> type_error e "Bad ID"
+                                    | None -> type_error e @@ "Bad ID: " ^ id
                                   end
                 end
     | CArr (ty, exp_ls) ->  (typecheck_ty e c ty);
@@ -168,9 +192,13 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
                                                     | None -> typecheck_exp (add_local c id TInt) exp2_n
                                                     end in 
                                           if subtype c t' ty then TRef (RArray ty) else type_error e "Bad NewArr";
-    | Index (exp1_n, exp2_n) -> begin match exp1_n.elt with
-                                | CArr (ty, exp_ls) -> if (typecheck_exp c exp2_n) == TInt then ty else type_error e "Bad Index";
-                                | _ -> type_error e "Bad Index"
+    | Index (exp1_n, exp2_n) -> begin match typecheck_exp c exp1_n with
+                                | TRef (RArray ty)  -> 
+                                              begin match typecheck_exp c exp2_n with
+                                              | TInt -> ty
+                                              | _ -> type_error e "Bad Index"
+                                              end
+                                | _ -> type_error e "Not an array"
                                 end
     | Length exp1_n ->  begin match exp1_n.elt with
                         | CArr (ty, exp_ls) -> TInt;
@@ -182,22 +210,27 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
                                         end in
                           let idty_ls = List.fold_left (fun ls (id,x) -> ls@[(id,typecheck_exp c x)]) [] exp_ls in
                           let sorted_idty_ls = List.sort (fun (a,b) (c,d) -> if a == c then 0 else if a < c then -1 else 1) idty_ls in
+                          if List.length sorted_fields_ls <> List.length sorted_idty_ls then type_error e "struct field length mismatch" else ();
                           if (List.fold_left (fun bol ((a,b), field) -> bol && subtype c b field.ftyp) true (List.combine sorted_idty_ls sorted_fields_ls)) then TRef (RStruct id) else type_error e "Bad Struct"
     | Proj (expn_1, fid) -> let exp1_ty = typecheck_exp c expn_1 in 
                             begin match exp1_ty with
-                            | TRef (RStruct id) -> lookup_field id fid c
+                            | TRef (RStruct id) -> begin match lookup_field_option id fid c with
+                                                    | Some field -> field
+                                                    | None -> type_error expn_1 "field not found in struct"
+                                                  end
                             | _ -> type_error e "Bad Struct (Field)"
                             end
     | Call (exp1_n, exp_ls) ->  begin match typecheck_exp c exp1_n with
                                 | TRef (RFun (tyls1, retty1)) ->  let ty_ls = List.fold_left (fun ls x -> ls@[typecheck_exp c x]) [] exp_ls in
+                                                                  if List.length ty_ls <> List.length tyls1 then type_error exp1_n "argument length mismatch" else ();
                                                                   let is_subtype = List.fold_left (fun b (x,y) -> b && subtype c x y ) true (List.combine ty_ls tyls1) in
                                                                   if is_subtype then begin match retty1 with
-                                                                                      | RetVoid   -> TInt (*definitly wrong and TODO*)
+                                                                                      | RetVoid   -> type_error e "can't use a void function in an expression" (*maybe wrong and TODO*)
                                                                                       | RetVal ty -> ty
-                                                                                      | _         -> type_error e "Bad return type in Call typecheck"
+                                                                                      | _         ->  type_error e "Bad return type in Call typecheck"
                                                                                       end
                                                                                     else type_error e "Bad Call"
-                                | _ -> type_error e "Bad Call"
+                                | _ -> type_error e "call - not a functino"
                                 end
     | Bop (Eq, exp1_n, exp2_n)    ->  let t1' = typecheck_exp c exp1_n and t2' = typecheck_exp c exp2_n in
                                       if(subtype c t1' t2') && (subtype c t2' t1') then TBool else  type_error e "Bad Eq Bop"
@@ -248,21 +281,28 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
 
 let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
   match s.elt with
-  | Assn (exp1_n, exp2_n)                     ->  let lhs_id = begin match exp1_n.elt with
-                                                               | Id i -> i
-                                                               | _ -> type_error exp1_n "LHS has no ID"
-                                                               end in
-                                                  begin match lookup_option lhs_id tc with
-                                                  | Some ty -> begin match ty with
-                                                               | TRef(RFun _) -> type_error exp1_n "LHS cant be funct. pointer"
-                                                               | _ -> ()
-                                                               end
-                                                  | None   ->  ()
-                                                  end;
+  | Assn (exp1_n, exp2_n)                     ->  let _ = begin match exp1_n.elt with
+                                                               | Id i -> begin match lookup_option i tc with
+                                                                          | Some TRef (RFun _) -> begin match lookup_global_option i tc with
+                                                                                                    | Some _ -> type_error exp1_n "cant assign values to functions"
+                                                                                                    | None -> ()
+                                                                                                  end
+                                                                          | Some _ -> ()
+                                                                          | None   -> type_error exp1_n "variable not in context"
+                                                                          end;
+                                                               | Index _ | Proj _ -> ()
+                                                               | _ -> type_error exp1_n "unknown lhs, can't assign"
+                                                          end in                                                  
                                                   let lhs_t = typecheck_exp tc exp1_n and rhs_t = typecheck_exp tc exp2_n in
                                                   if subtype tc rhs_t lhs_t then (tc, false) else type_error exp1_n "LHS not supertype of RHS"
   | Decl (vd_id, vd_exp_n)                    ->  let exp_ty = typecheck_exp tc vd_exp_n in
-                                                  (add_local tc vd_id exp_ty, false)
+                                                  begin match lookup_local_option vd_id tc with
+                                                  | Some _ -> type_error vd_exp_n "declared variable alraedy in context"
+                                                  | None -> begin match lookup_struct_option vd_id tc with
+                                                              | Some _ -> type_error vd_exp_n "declared variable alraedy in context"
+                                                              | None -> (add_local tc vd_id exp_ty, false)
+                                                            end
+                                                  end
   | Ret (Some exp_n)                          ->  let t' = typecheck_exp tc exp_n in
                                                   begin match to_ret with
                                                   | RetVoid   -> type_error exp_n "expected void return but got something else"
@@ -279,6 +319,7 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
                                                   let sub_ty_ls = List.fold_left(fun ty_ls exp ->
                                                     ty_ls@[typecheck_exp tc exp]
                                                     ) [] exp_ls in
+                                                  if List.length super_ty_ls <> List.length sub_ty_ls then type_error exp_n "argument length mismatch" else ();
                                                   let is_all_subtype = List.fold_left(fun b (sub, sup) -> b && (subtype tc sub sup)) true (List.combine sub_ty_ls super_ty_ls) in (* TODO if error, check rule again precisely *)
                                                   if is_all_subtype then (tc, false) else type_error exp_n "Params have wrong type"
   | If (exp_n, stm1_ls, stm2_ls)              ->  let guard_ty = typecheck_exp tc exp_n in
@@ -287,7 +328,16 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
                                                                 tc, (true_block_returns && false_block_returns)
                                                     | _     -> type_error exp_n "If - expression doesn't return a bool"
                                                   end
-  | Cast (retty, id, exp_n, stm1_ls, stm2_ls) ->  (tc, false); failwith "todo: implement typecheck_stmt"
+  | Cast (refty, id, exp_n, stm1_ls, stm2_ls) ->  let t_ref = begin match typecheck_exp tc exp_n with
+                                                    | TNullRef t -> TRef t
+                                                    | _          -> type_error exp_n "cant cast to a non-null-reference"
+                                                  end in
+                                                  begin match subtype tc t_ref (TRef refty) with
+                                                    | false -> type_error exp_n "casting types are not subtypes"
+                                                    | true  ->  let tc' = add_local tc id t_ref in
+                                                                let _, bl1 = typecheck_block tc' stm1_ls to_ret and _, bl2 = typecheck_block tc' stm2_ls to_ret in
+                                                                tc, bl1 && bl2
+                                                  end
   | For (vd_ls, exp_n_o, stm_n_o, stm_ls)     ->  let tc' = List.fold_left (fun c (id, exp) -> 
                                                     let exp_ty = typecheck_exp c exp in
                                                     begin match lookup_option id c with
@@ -388,38 +438,39 @@ let typecheck_fdecl (tc : Tctxt.t) (f : Ast.fdecl) (l : 'a Ast.node) : unit =
 let create_struct_ctxt (p:Ast.prog) : Tctxt.t =
   begin match p with
   | []    -> Tctxt.empty
-  | d_ls  -> {locals=[]; globals=[]; structs=(List.fold_left (fun ls x -> begin match x with
-                                        | Gvdecl gd -> ls
-                                        | Gfdecl fd -> ls
-                                        | Gtdecl td ->  begin match lookup_struct_option (fst td.elt) {locals=[]; globals=[]; structs=ls} with
+  | d_ls  -> List.fold_left (fun c x -> begin match x with
+                                        | Gvdecl gd -> c
+                                        | Gfdecl fd -> c
+                                        | Gtdecl td ->  begin match lookup_struct_option (fst td.elt) c with
                                                         | Some _  -> type_error td "struct already in context"
-                                                        | None    -> (td.elt)::ls
+                                                        | None    -> add_struct c (fst td.elt) (snd td.elt)
                                                         end
                                         | _         -> failwith "not a decl (create_struct_ctxt)"
                                         end
-                            ) [] d_ls)}
+                            ) Tctxt.empty d_ls
   | _     -> failwith "Not a program"
   end
 
 let create_function_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
-  let tc = List.fold_left (fun c (id, (arg, ret)) -> Tctxt.add_global c id (TRef(RFun(arg,ret)))) tc builtins in
+  let tc' = List.fold_left (fun c (id, (arg, ret)) -> Tctxt.add_global c id (TRef(RFun(arg,ret)))) tc builtins in
   begin match p with
-  | []    -> tc
-  | d_ls  -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
-                                        | Gvdecl gd -> ls
+  | []    -> tc'
+  | d_ls  -> List.fold_left (fun c x -> begin match x with
+                                        | Gvdecl gd -> c
                                         | Gfdecl fd ->  let retty = fd.elt.frtyp in
                                                         let fid = fd.elt.fname in
                                                         let (ty_ls, _) = List.split fd.elt.args in
-                                                        begin match lookup_global_option fid {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} with
+                                                        begin match lookup_global_option fid c with
                                                         | Some _  -> type_error fd "function already in context"
-                                                        | None    -> (fid, TRef(RFun (ty_ls, retty)))::ls
+                                                        | None    -> add_global c fid (TRef(RFun (ty_ls, retty)))
                                                         end
-                                        | Gtdecl td -> ls
+                                        | Gtdecl td -> c
                                         | _         -> failwith "not a decl (create_struct_ctxt)"
                                         end
-                            ) [] d_ls);structs=tc.structs}
+                            ) tc' d_ls
   | _   -> failwith "Not a program"
   end
+
 
 (* helper function to check wether gexp conains any globals*)
 let rec contains_globals funct_c glob_c gexp =
@@ -441,22 +492,20 @@ let rec contains_globals funct_c glob_c gexp =
 let create_global_ctxt (tc:Tctxt.t) (p:Ast.prog) : Tctxt.t =
   begin match p with
   | []    -> tc
-  | d_ls  -> {locals=tc.locals; globals=(List.fold_left (fun ls x -> begin match x with
-                                        | Gvdecl gd ->  let gid = gd.elt.name in
-                                                        if contains_globals tc {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} gd.elt.init.elt then type_error gd "globals clash" else 
-                                                        let exp_ty = typecheck_exp {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} gd.elt.init in
-                                                        begin match lookup_global_option gid {locals=tc.locals; globals=ls@tc.globals; structs=tc.structs} with
-                                                        | Some _  -> type_error gd "global already in context"
-                                                        | None    -> (gid, exp_ty)::ls
-                                                        end
-                                        | Gfdecl fd -> ls
-                                        | Gtdecl td -> ls
-                                        | _         -> failwith "not a decl (create_struct_ctxt)"
-                                        end
-                            ) [] d_ls);structs=tc.structs}
+  | d_ls  -> List.fold_left (fun tc' decl -> 
+              begin match decl with
+                | Gvdecl gd -> 
+                  let gexp_ty = typecheck_exp tc' gd.elt.init in
+                  if contains_globals tc tc' gd.elt.init.elt then type_error gd "global declaration contains other globals"
+                  else ();
+                  begin match lookup_global_option gd.elt.name tc'  with
+                    | Some _ -> type_error gd "global declaration is already in context"
+                    | None   -> add_global tc' gd.elt.name gexp_ty
+                  end
+                | _ -> tc'
+              end) tc d_ls
   | _   -> failwith "Not a program"
   end
-
 
 (* This function implements the |- prog and the H ; G |- prog 
    rules of the oat.pdf specification.   

@@ -141,7 +141,7 @@ let typecheck_error (a : assertion) () =
   try a (); failwith "Should have a type error" with Typechecker.TypeError s -> ()
 
 let typecheck_correct (a : assertion) () =
-  try a () with Typechecker.TypeError s -> failwith "Should not have had a type error"
+  try a () with Typechecker.TypeError s -> failwith @@ s ^ " _ Should not have had a type error"
 
 
 let typecheck_file_error tests =
