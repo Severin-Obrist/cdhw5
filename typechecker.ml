@@ -245,11 +245,6 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
      block typecheck rules.
 *)
 
-let typecheck_block (tc : Tctxt.t) (sl:Ast.stmt node list) (to_ret:ret_ty) : Tctxt.t * bool = 
-  let returns, tc', _ = List.fold_left (fun (b, c, ret) s -> 
-    let stmt_c, stmt_b = typecheck_stmt c s ret in
-    (b && stmt_b), stmt_c, ret) (true, tc, to_ret) sl in
-  tc', returns
 
 let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
   match s.elt with
@@ -295,25 +290,31 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
                                                       | Some exp -> exp
                                                       | None -> type_error s "For - empty expression not supported"
                                                     end in
-                                                  let stmt_n = begin match stmt_n_o with
+                                                  let stmt_n = begin match stm_n_o with
                                                       | Some stmt -> stmt
                                                       | None -> type_error s "For - empty statement not supported"
                                                     end in
-                                                  let _, for_stmt_returns = typecheck_stmt tc' stmt_n in
+                                                  let _, for_stmt_returns = typecheck_stmt tc' stmt_n to_ret in
                                                   if for_stmt_returns then type_error stmt_n "For - Statement isn't allowed to return" else ();
                                                   let guard_ty = typecheck_exp tc' exp_n in
                                                     begin match guard_ty with
-                                                      | TBool ->  let _ = typecheck_block tc' stm1_ls to_ret in
+                                                      | TBool ->  let _ = typecheck_block tc' stm_ls to_ret in
                                                                   tc, false
                                                       | _     -> type_error exp_n "while - expression doesn't return a bool"
                                                     end
   | While (exp_n, stm_ls)                     -> let guard_ty = typecheck_exp tc exp_n in
                                                   begin match guard_ty with
-                                                    | TBool ->  let _ = typecheck_block tc stm1_ls to_ret in
+                                                    | TBool ->  let _ = typecheck_block tc stm_ls to_ret in
                                                                 tc, false
                                                     | _     -> type_error exp_n "while - expression doesn't return a bool"
                                                   end
   | _                                         -> failwith "not a valid statement"
+
+  and typecheck_block (tc : Tctxt.t) (sl:Ast.stmt node list) (to_ret:ret_ty) : Tctxt.t * bool = 
+      let returns, tc', _ = List.fold_left (fun (b, c, ret) s -> 
+        let stmt_c, stmt_b = typecheck_stmt c s ret in
+        (b && stmt_b), stmt_c, ret) (true, tc, to_ret) sl in
+      tc', returns
 
 
 (* struct type declarations ------------------------------------------------- *)
