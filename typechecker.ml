@@ -244,6 +244,13 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
    - You will probably find it convenient to add a helper function that implements the 
      block typecheck rules.
 *)
+
+let typecheck_block (tc : Tctxt.t) (sl:Ast.stmt node list) (to_ret:ret_ty) : Tctxt.t * bool = 
+  let returns, tc', _ = List.fold_left (fun (b, c, ret) s -> 
+    let stmt_c, stmt_b = typecheck_stmt c s ret in
+    (b && stmt_b), stmt_c, ret) (true, tc, to_ret) sl in
+  tc', returns
+
 let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.t * bool =
   match s.elt with
   | Assn (exp1_n, exp2_n)                     ->  let lhs_id = begin match exp1_n.elt with
@@ -259,20 +266,53 @@ let rec typecheck_stmt (tc : Tctxt.t) (s:Ast.stmt node) (to_ret:ret_ty) : Tctxt.
                                                   end;
                                                   let lhs_t = typecheck_exp tc exp1_n and rhs_t = typecheck_exp tc exp2_n in
                                                   if subtype tc rhs_t lhs_t then (tc, false) else type_error exp1_n "LHS not supertype of RHS"
-  | Decl (vd_id, vd_exp_n)                    -> let exp_ty = typecheck_exp tc vd_exp_n in
+  | Decl (vd_id, vd_exp_n)                    ->  let exp_ty = typecheck_exp tc vd_exp_n in
                                                   (add_local tc vd_id exp_ty, false)
-  | Ret exp_n_o                               -> (tc, false); failwith "todo: implement typecheck_stmt"
-  | SCall (exp_n, exp_ls)                     -> let exp_ty_ls = begin match typecheck_exp tc exp_n with
-                                                 | TRef (RFun(a, RetVoid)) -> a
-                                                 | _ -> type_error exp1_n "expression not void"
-                                                 end in 
-                                                 (*if (List.fold_left (fun b x -> b &&  (Unit.equal (typecheck_ty l tc x) ())) (Unit.equal (typecheck_retty l tc retty1) ()) tyls1) then () else type_error l "Bad Function"*)
-
-
-  | If (exp_n, stm1_ls, stm2_ls)              -> (tc, false); failwith "todo: implement typecheck_stmt"
-  | Cast (retty, id, exp_n, stm1_ls, stm2_ls) -> (tc, false); failwith "todo: implement typecheck_stmt"
-  | For (vd_ls, exp_n_o, stm_n_o, stm_ls)     -> (tc, false); failwith "todo: implement typecheck_stmt"
-  | While (exp_n, stm_ls)                     -> (tc, false); failwith "todo: implement typecheck_stmt"
+  | Ret exp_n_o                               ->  (tc, false); failwith "todo: implement typecheck_stmt"
+  | SCall (exp_n, exp_ls)                     ->  let super_ty_ls = begin match typecheck_exp tc exp_n with
+                                                  | TRef (RFun(a, RetVoid)) -> a
+                                                  | _ -> type_error exp_n "expression not void"
+                                                  end in
+                                                  let sub_ty_ls = List.fold_left(fun ty_ls exp ->
+                                                    ty_ls@[typecheck_exp tc exp]
+                                                    ) [] exp_ls in
+                                                  let is_all_subtype = List.fold_left(fun b (sub, sup) -> b && (subtype tc sub sup)) true (List.combine sub_ty_ls super_ty_ls) in (* TODO if error, check rule again precisely *)
+                                                  if is_all_subtype then (tc, false) else type_error exp_n "Params have wrong type"
+  | If (exp_n, stm1_ls, stm2_ls)              ->  let guard_ty = typecheck_exp tc exp_n in
+                                                  begin match guard_ty with
+                                                    | TBool ->  let (_, true_block_returns) = typecheck_block tc stm1_ls to_ret and (_, false_block_returns) = typecheck_block tc stm2_ls to_ret in
+                                                                tc, (true_block_returns && false_block_returns)
+                                                    | _     -> type_error exp_n "If - expression doesn't return a bool"
+                                                  end
+  | Cast (retty, id, exp_n, stm1_ls, stm2_ls) ->  (tc, false); failwith "todo: implement typecheck_stmt"
+  | For (vd_ls, exp_n_o, stm_n_o, stm_ls)     ->  let tc' = List.fold_left (fun c (id, exp) -> 
+                                                    let exp_ty = typecheck_exp c exp in
+                                                    begin match lookup_option id c with
+                                                      | Some _ -> type_error s "For-variable already in context"
+                                                      | None -> Tctxt.add_local c id exp_ty
+                                                    end) tc vd_ls in
+                                                  let exp_n = begin match exp_n_o with
+                                                      | Some exp -> exp
+                                                      | None -> type_error s "For - empty expression not supported"
+                                                    end in
+                                                  let stmt_n = begin match stmt_n_o with
+                                                      | Some stmt -> stmt
+                                                      | None -> type_error s "For - empty statement not supported"
+                                                    end in
+                                                  let _, for_stmt_returns = typecheck_stmt tc' stmt_n in
+                                                  if for_stmt_returns then type_error stmt_n "For - Statement isn't allowed to return" else ();
+                                                  let guard_ty = typecheck_exp tc' exp_n in
+                                                    begin match guard_ty with
+                                                      | TBool ->  let _ = typecheck_block tc' stm1_ls to_ret in
+                                                                  tc, false
+                                                      | _     -> type_error exp_n "while - expression doesn't return a bool"
+                                                    end
+  | While (exp_n, stm_ls)                     -> let guard_ty = typecheck_exp tc exp_n in
+                                                  begin match guard_ty with
+                                                    | TBool ->  let _ = typecheck_block tc stm1_ls to_ret in
+                                                                tc, false
+                                                    | _     -> type_error exp_n "while - expression doesn't return a bool"
+                                                  end
   | _                                         -> failwith "not a valid statement"
 
 
