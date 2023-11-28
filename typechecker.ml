@@ -200,9 +200,9 @@ let rec typecheck_exp (c : Tctxt.t) (e : Ast.exp node) : Ast.ty =
                                               end
                                 | _ -> type_error e "Not an array"
                                 end
-    | Length exp1_n ->  begin match exp1_n.elt with
-                        | CArr (ty, exp_ls) -> TInt;
-                        | _ -> type_error e "Bad Length"
+    | Length exp1_n ->  begin match typecheck_exp c exp1_n with
+                        | TRef (RArray _) -> TInt;
+                        | _ -> type_error e "exp1 is not an array"
                         end
     | CStruct (id, exp_ls) -> let sorted_fields_ls =  begin match lookup_struct_option id c with
                                         | Some s -> List.sort (fun field1 field2 -> if field1.fieldName == field2.fieldName then 0 else if field1.fieldName < field2.fieldName then -1 else 1) s

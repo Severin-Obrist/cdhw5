@@ -276,7 +276,10 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
        of the array struct representation.
   *)
   | Ast.Length e ->
-    failwith "todo:implement Ast.Length case"
+    let ans_id = gensym "len" in
+    let temp = gensym "temp" in
+    let e_ty, e_op, e_stream = cmp_exp tc c e in
+    I64, Id ans_id, e_stream >@ [I(ans_id, Load(I64, Id temp)); I(temp, Gep(Ptr I64, e_op, [Const 0L; Const 0L]))]
 
   | Ast.Index (e, i) ->
     let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
@@ -310,10 +313,38 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
      you could write the loop using abstract syntax and then call cmp_stmt to
      compile that into LL code...
   *)
-  | Ast.NewArr (elt_ty, e1, id, e2) ->    
-    let _, size_op, size_code = cmp_exp tc c e1 in
-    let arr_ty, arr_op, alloc_code = oat_alloc_array tc elt_ty size_op in
-    arr_ty, arr_op, size_code >@ alloc_code
+  | Ast.NewArr (elt_ty, e1, id, e2) ->
+    let len_id = gensym "len" in
+    let len_n = no_loc (Id len_id) in
+    let len_stmt = no_loc (Decl (len_id, e1)) in
+    let len_c, len_stream = cmp_stmt tc c Void len_stmt in          (* create variable to save the length value of the array *)
+
+    let _, size_op, size_stream = cmp_exp tc c e1 in                  (* saves size value at 'size_op' *)
+    let arr_ty, arr_op, alloc_stream = oat_alloc_array tc elt_ty size_op in
+
+    let cnt_id = gensym "cnt" in
+    let cnt_n = no_loc (Id cnt_id) in
+    let cnt_init_exp = (no_loc (CInt 0L)) in                        (* create vdecl for the For-loop *)
+
+    let cnd_exp = no_loc (Bop(Lt, cnt_n, len_n)) in                 (* condition for For-loop *)
+
+    let inc_e_n = no_loc (Bop(Add, cnt_n, no_loc (CInt 1L))) in
+    let inc_s_n = no_loc (Assn(cnt_n, inc_e_n)) in                  (* increment counter *)
+
+    let base_id = gensym "arr_base" in
+    let base_e_n = no_loc (Id base_id) in
+    let offset_id = gensym "arr_offset" in
+    let allocate_space = E(offset_id, Alloca(arr_ty)) in
+    let store_at_index = I("", Store(arr_ty, arr_op, Id offset_id)) in
+    let index_from_base_e_n = no_loc (Index(base_e_n, cnt_n)) in
+    let assign_val_to_index_s = no_loc (Assn(index_from_base_e_n, e2)) in   (* For-loop body *)
+
+    let c_new = Ctxt.add len_c base_id (Ptr arr_ty, Id offset_id) in
+
+    let for_stmt = no_loc (For([(cnt_id, cnt_init_exp)], Some (cnd_exp), Some(inc_s_n), [assign_val_to_index_s]))in
+    let c', for_stream = cmp_stmt tc c_new Void for_stmt in
+
+    arr_ty, arr_op, len_stream >@ size_stream >@ alloc_stream >@ [store_at_index; allocate_space] >@ for_stream
 
    (* STRUCT TASK: complete this code that compiles struct expressions.
       For each field component of the struct
@@ -360,8 +391,12 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
       | Ptr (Struct [_; Array (_,t)]) -> t 
       | _ -> failwith "Index: indexed into non pointer" in
     let ptr_id, tmp_id = gensym "index_ptr", gensym "tmp" in
+    let arr_ptr_id = gensym "arr_ptr" in
+    let bitcast_stream = I(arr_ptr_id, Bitcast(arr_ty, arr_op, Ptr I64)) in
+    let call_stream = I("", Call(Void, Gid "oat_assert_array_length", [(Ptr I64, Id arr_ptr_id); (I64, ind_op)])) in
+
     ans_ty, (Id ptr_id),
-    arr_code >@ ind_code >@ lift
+    arr_code >@ ind_code >@ [bitcast_stream] >@ [call_stream] >@ lift
       [ptr_id, Gep(arr_ty, arr_op, [i64_op_of_int 0; i64_op_of_int 1; ind_op]) ]
 
    
