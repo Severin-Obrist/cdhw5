@@ -325,13 +325,12 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     let len_id = gensym "len" in
     let len_n = no_loc (Id len_id) in
     let len_stmt = no_loc (Decl (len_id, e1)) in
-    let len_c, len_stream = cmp_stmt tc c Void len_stmt in          (* create variable to save the length value of the array *)
+    let c_new, len_stream = cmp_stmt tc c Void len_stmt in          (* create variable to save the length value of the array *)
 
-    let _, size_op, size_stream = cmp_exp tc c e1 in                  (* saves size value at 'size_op' *)
+    let _, size_op, size_stream = cmp_exp tc c_new len_n in                  (* saves size value at 'size_op' *)
     let arr_ty, arr_op, alloc_stream = oat_alloc_array tc elt_ty size_op in
 
-    let cnt_id = gensym "cnt" in
-    let cnt_n = no_loc (Id cnt_id) in
+    let cnt_n = no_loc (Id id) in
     let cnt_init_exp = (no_loc (CInt 0L)) in                        (* create vdecl for the For-loop *)
 
     let cnd_exp = no_loc (Bop(Lt, cnt_n, len_n)) in                 (* condition for For-loop *)
@@ -347,9 +346,9 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
     let index_from_base_e_n = no_loc (Index(base_e_n, cnt_n)) in
     let assign_val_to_index_s = no_loc (Assn(index_from_base_e_n, e2)) in   (* For-loop body *)
 
-    let c_new = Ctxt.add len_c base_id (Ptr arr_ty, Id offset_id) in
+    let c_new = Ctxt.add c_new base_id (Ptr arr_ty, Id offset_id) in
 
-    let for_stmt = no_loc (For([(cnt_id, cnt_init_exp)], Some (cnd_exp), Some(inc_s_n), [assign_val_to_index_s]))in
+    let for_stmt = no_loc (For([(id, cnt_init_exp)], Some (cnd_exp), Some(inc_s_n), [assign_val_to_index_s]))in
     let c', for_stream = cmp_stmt tc c_new Void for_stmt in
 
     arr_ty, arr_op, len_stream >@ size_stream >@ alloc_stream >@ [store_at_index; allocate_space] >@ for_stream
@@ -491,9 +490,11 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
 
        - as in the if-the-else construct, you should jump to the common
          merge label after either block
+
+       Cast of rty * id * exp node * stmt node list * stmt node list
   *)
   | Ast.Cast (typ, id, exp, notnull, null) ->
-    failwith "todo: implement Ast.Cast case"
+    failwith "penis"
 
   | Ast.While (guard, body) ->
      let guard_ty, guard_op, guard_code = cmp_exp tc c guard in
@@ -649,11 +650,11 @@ let rec cmp_gexp c (tc : TypeCtxt.t) (e:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.
 
   (* STRUCT TASK: Complete this code that generates the global initializers for a struct value. *)  
   | CStruct (id, cs) ->
-    let struct_id, raw_struct_id = gensym id, gensym @@ "raw_" ^ id in
+    let raw_struct_id = gensym @@ "raw_" ^ id in
     let fields = TypeCtxt.lookup id tc in
     let decls, additional_globals = List.fold_left (fun (d, a) field -> 
       let g_decl, g_additionals = cmp_gexp c tc (List.assoc field.fieldName cs) in
-      g_decl::d, g_additionals@a 
+      d@[g_decl], a@g_additionals 
       ) ([], []) fields in
     (Ptr(Namedt id), GGid raw_struct_id), (raw_struct_id, (Namedt id, GStruct decls))::additional_globals
 
