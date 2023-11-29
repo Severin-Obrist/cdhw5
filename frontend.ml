@@ -194,9 +194,17 @@ let oat_alloc_array ct (t:Ast.ty) (size:Ll.operand) : Ll.ty * operand * stream =
      resulting pointer to the right type
 
    - make sure to calculate the correct amount of space to allocate!
+
+   "oat_malloc",              Ll.Fun ([I64], Ptr I64)
 *)
 let oat_alloc_struct ct (id:Ast.id) : Ll.ty * operand * stream =
-  failwith "TODO: oat_alloc_struct"
+  let ans_id, struct_id = gensym "struct", gensym "raw_struct" in
+  let struct_ty = Ptr (Namedt id) in
+  let ans_ty = Ptr I64 in
+  let fields = TypeCtxt.lookup id ct in
+  let size_of_fields = List.fold_left (fun s f -> (Int64.add s (size_oat_ty f.ftyp))) 0L fields in
+  struct_ty, Id ans_id, [I(ans_id, Bitcast(ans_ty, Id struct_id, struct_ty))] >@ [I(struct_id, Call(ans_ty, Gid "oat_malloc", [I64, Const size_of_fields]))]
+
 
 
 let str_arr_ty s = Array(1 + String.length s, I8)
@@ -353,7 +361,14 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
        - store the resulting value into the structure
    *)
   | Ast.CStruct (id, l) ->
-    failwith "TODO: Ast.CStruct"
+    let struct_ty, struct_op, struct_stream = oat_alloc_struct tc id in
+    let field_stream = List.fold_left (fun stream (f_id, f_exp_n) ->
+      let f_e_ty, f_e_op, f_e_stream = cmp_exp tc c f_exp_n in
+      let temp = gensym "struct_temp" and index = TypeCtxt.index_of_field id f_id tc in
+      let fill_stream = [I(temp, Gep(struct_ty, struct_op, [Const 0L; Const (Int64.of_int index)]))] >:: I("", Store(f_e_ty, f_e_op, Id temp)) in
+      stream >@ f_e_stream >@ fill_stream
+      ) [] l in
+      struct_ty, struct_op, struct_stream >@ field_stream
 
   | Ast.Proj (e, id) ->
     let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
@@ -375,7 +390,15 @@ and cmp_exp_lhs (tc : TypeCtxt.t) (c:Ctxt.t) (e:exp node) : Ll.ty * Ll.operand *
      You will find the TypeCtxt.lookup_field_name function helpful.
   *)
   | Ast.Proj (e, i) ->
-    failwith "todo: Ast.Proj case of cmp_exp_lhs"
+    let e_ty, e_op, e_stream = cmp_exp tc c e in
+    let struct_id = begin match e_ty with
+                      | Ptr (Namedt t) -> t
+                      | _   -> failwith "expression is not a struct"
+                    end in
+    let field_ty, field_index = TypeCtxt.lookup_field_name struct_id i tc in
+    let field_id = gensym "struct_field" in
+    let stream = I(field_id, Gep(e_ty, e_op, [Const 0L; Const field_index])) in
+    cmp_ty tc field_ty, Id field_id, e_stream >:: stream
 
 
   (* ARRAY TASK: Modify this index code to call 'oat_assert_array_length' before doing the 
@@ -626,7 +649,13 @@ let rec cmp_gexp c (tc : TypeCtxt.t) (e:Ast.exp node) : Ll.gdecl * (Ll.gid * Ll.
 
   (* STRUCT TASK: Complete this code that generates the global initializers for a struct value. *)  
   | CStruct (id, cs) ->
-    failwith "todo: Cstruct case of cmp_gexp"
+    let struct_id, raw_struct_id = gensym id, gensym @@ "raw_" ^ id in
+    let fields = TypeCtxt.lookup id tc in
+    let decls, additional_globals = List.fold_left (fun (d, a) field -> 
+      let g_decl, g_additionals = cmp_gexp c tc (List.assoc field.fieldName cs) in
+      g_decl::d, g_additionals@a 
+      ) ([], []) fields in
+    (Ptr(Namedt id), GGid raw_struct_id), (raw_struct_id, (Namedt id, GStruct decls))::additional_globals
 
   | _ -> failwith "bad global initializer"
 
