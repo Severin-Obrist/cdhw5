@@ -362,13 +362,30 @@ let rec cmp_exp (tc : TypeCtxt.t) (c:Ctxt.t) (exp:Ast.exp node) : Ll.ty * Ll.ope
   | Ast.CStruct (id, l) ->
     let struct_ty, struct_op, struct_stream = oat_alloc_struct tc id in
     let field_stream = List.fold_left (fun stream (f_id, f_exp_n) ->
-      let f_e_ty, f_e_op, f_e_stream = cmp_exp tc c f_exp_n in
+      let f_typ = cmp_ty tc (TypeCtxt.lookup_field id f_id tc) in
+      let f_e_op, f_e_stream = cmp_exp_as tc c f_exp_n f_typ in
       let temp = gensym "struct_temp" and index = TypeCtxt.index_of_field id f_id tc in
-      let fill_stream = [I(temp, Gep(struct_ty, struct_op, [Const 0L; Const (Int64.of_int index)]))] >:: I("", Store(f_e_ty, f_e_op, Id temp)) in
+      let fill_stream = [I(temp, Gep(struct_ty, struct_op, [Const 0L; Const (Int64.of_int index)]))] >:: I("", Store(f_typ, f_e_op, Id temp)) in
       stream >@ f_e_stream >@ fill_stream
       ) [] l in
       struct_ty, struct_op, struct_stream >@ field_stream
 
+
+(*
+  | Ast.CStruct (id, l) ->
+    let struct_ty, struct_op, alloc_code = oat_alloc_struct tc id in
+    let add_elt s (fid, fexp) =
+      let field_type = cmp_ty tc @@ TypeCtxt.lookup_field id fid tc in
+      let index = TypeCtxt.index_of_field id fid tc in
+      let elt_op, elt_code = cmp_exp_as tc c fexp field_type in
+      let ind = gensym "ind" in
+      s >@ elt_code >@ lift
+        [ ind, Gep(struct_ty, struct_op, [Const 0L; i64_op_of_int index])
+        ; gensym "store", Store(field_type, elt_op, Id ind) ]
+    in
+    let ind_code = List.fold_left add_elt [] l in
+    struct_ty, struct_op, alloc_code >@ ind_code
+*)
   | Ast.Proj (e, id) ->
     let ans_ty, ptr_op, code = cmp_exp_lhs tc c exp in
     let ans_id = gensym "proj" in
@@ -494,21 +511,7 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
        Cast of rty * id * exp node * stmt node list * stmt node list
   *)
   | Ast.Cast (typ, id, exp, notnull, null) ->
-    let null_lbl, nnull_lbl, merge_lbl, temp_id = gensym "null", gensym "notnull", gensym "merge", gensym "cast_temp" in   (* make Labels *)
-    let refty = cmp_ty tc (TRef typ) in                 (* cmp rty typ*)
-    let ans_id = gensym id in                           (* create return id *)
-
-    let ifq_op, ifq_stream = cmp_exp_as tc c exp refty in   (* cmp ifq guard expression *)
-    
-    let c_new = Ctxt.add c id (Ptr refty, Id ans_id) in     (* update context *)
-
-    let null_str = cmp_block tc c rt null 
-    and not_null_str = cmp_block tc c rt null in        (* create both blocks of code *)
-
-    let null_stream = [L null_lbl] >@ null_str >@ [T(Br merge_lbl)] in
-    let not_null_stream = [L nnull_lbl] >@ [I("", Store(refty, ifq_op, Id ans_id)); E(ans_id, Alloca(refty))] >@ not_null_str >:: T(Br merge_lbl) in (* complete blocks with labels *)
-    
-    c, ifq_stream >@ [T(Cbr(Id temp_id, null_lbl, nnull_lbl)); I(temp_id, Icmp(Eq, refty, ifq_op, Null))] >@ null_stream >@ not_null_stream >:: L(merge_lbl)
+    failwith "penis"
 
   | Ast.While (guard, body) ->
      let guard_ty, guard_op, guard_code = cmp_exp tc c guard in
