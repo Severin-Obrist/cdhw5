@@ -511,7 +511,21 @@ and cmp_stmt (tc : TypeCtxt.t) (c:Ctxt.t) (rt:Ll.ty) (stmt:Ast.stmt node) : Ctxt
        Cast of rty * id * exp node * stmt node list * stmt node list
   *)
   | Ast.Cast (typ, id, exp, notnull, null) ->
-    failwith "penis"
+    let null_lbl, nnull_lbl, merge_lbl, temp_id = gensym "null", gensym "notnull", gensym "merge", gensym "cast_temp" in   (* make Labels *)
+    let refty = cmp_ty tc (TRef typ) in                 (* cmp rty typ*)
+    let ans_id = gensym id in                           (* create return id *)
+
+    let ifq_op, ifq_stream = cmp_exp_as tc c exp refty in   (* cmp ifq guard expression *)
+    
+    let c_new = Ctxt.add c id (Ptr refty, Id ans_id) in     (* update context *)
+
+    let null_str = cmp_block tc c rt null 
+    and not_null_str = cmp_block tc c rt null in        (* create both blocks of code *)
+
+    let null_stream = [L null_lbl] >@ null_str >@ [T(Br merge_lbl)] in
+    let not_null_stream = [L nnull_lbl] >@ [I("", Store(refty, ifq_op, Id ans_id)); E(ans_id, Alloca(refty))] >@ not_null_str >:: T(Br merge_lbl) in (* complete blocks with labels *)
+    
+    c, ifq_stream >@ [T(Cbr(Id temp_id, null_lbl, nnull_lbl)); I(temp_id, Icmp(Eq, refty, ifq_op, Null))] >@ null_stream >@ not_null_stream >:: L(merge_lbl)
 
   | Ast.While (guard, body) ->
      let guard_ty, guard_op, guard_code = cmp_exp tc c guard in
